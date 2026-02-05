@@ -4,6 +4,7 @@ import {
   PaymentHoldStatus,
   TransportJobStatus,
   DecisionAction,
+  isValidTransition,
 } from "@/lib/domain";
 
 export async function POST(
@@ -35,11 +36,7 @@ export async function POST(
         };
       }
 
-      const blockedJobStatuses: string[] = [
-        TransportJobStatus.CANCELLED,
-        TransportJobStatus.DISPUTED,
-      ];
-      if (blockedJobStatuses.includes(job.status)) {
+      if (!isValidTransition(job.status, TransportJobStatus.RELEASED)) {
         return {
           status: 409,
           payload: {

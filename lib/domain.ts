@@ -65,6 +65,10 @@ export const DecisionAction = {
   CANCEL: "cancel",
   OVERRIDE: "override",
   EVALUATE: "evaluate",
+  ASSIGN: "assign",
+  ACCEPT: "accept",
+  PICKUP_CONFIRM: "pickup_confirm",
+  DELIVERY_SUBMIT: "delivery_submit",
 } as const;
 
 export type DecisionActionValue =
@@ -100,4 +104,39 @@ export function isValidPaymentRail(s: string): s is PaymentRailValue {
 
 export function isValidApprovalMode(s: string): s is ApprovalModeValue {
   return s === ApprovalMode.AUTO || s === ApprovalMode.MANUAL;
+}
+
+// ----- State machine: valid transitions -----
+export const VALID_TRANSITIONS: Record<TransportJobStatusValue, readonly TransportJobStatusValue[]> = {
+  [TransportJobStatus.DRAFT]: [],
+  [TransportJobStatus.ASSIGNED]: [TransportJobStatus.DRAFT],
+  [TransportJobStatus.ACCEPTED]: [TransportJobStatus.ASSIGNED],
+  [TransportJobStatus.PICKUP_CONFIRMED]: [TransportJobStatus.ACCEPTED],
+  [TransportJobStatus.DELIVERY_SUBMITTED]: [TransportJobStatus.PICKUP_CONFIRMED],
+  [TransportJobStatus.RELEASABLE]: [TransportJobStatus.DELIVERY_SUBMITTED],
+  [TransportJobStatus.RELEASED]: [TransportJobStatus.RELEASABLE],
+  [TransportJobStatus.DISPUTED]: [
+    TransportJobStatus.ACCEPTED,
+    TransportJobStatus.PICKUP_CONFIRMED,
+    TransportJobStatus.DELIVERY_SUBMITTED,
+    TransportJobStatus.RELEASABLE,
+    TransportJobStatus.RELEASED,
+  ],
+  [TransportJobStatus.CANCELLED]: [
+    TransportJobStatus.DRAFT,
+    TransportJobStatus.ASSIGNED,
+    TransportJobStatus.ACCEPTED,
+    TransportJobStatus.PICKUP_CONFIRMED,
+    TransportJobStatus.DELIVERY_SUBMITTED,
+    TransportJobStatus.RELEASABLE,
+  ],
+};
+
+export function isValidTransition(
+  currentStatus: string,
+  targetStatus: TransportJobStatusValue,
+): boolean {
+  const validFrom = VALID_TRANSITIONS[targetStatus];
+  if (!validFrom) return false;
+  return (validFrom as readonly string[]).includes(currentStatus);
 }

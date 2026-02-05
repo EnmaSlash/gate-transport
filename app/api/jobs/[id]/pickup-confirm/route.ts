@@ -20,6 +20,7 @@ export async function POST(
   try {
     const body = await req.json().catch(() => ({}));
     const actor = typeof body?.actor === "string" ? body.actor : "unknown";
+    const note = typeof body?.note === "string" ? body.note : undefined;
 
     const job = await prisma.transportJob.findUnique({
       where: { id },
@@ -33,9 +34,9 @@ export async function POST(
       );
     }
 
-    if (!isValidTransition(job.status, TransportJobStatus.ACCEPTED)) {
+    if (!isValidTransition(job.status, TransportJobStatus.PICKUP_CONFIRMED)) {
       return NextResponse.json(
-        { ok: false, error: "Conflict", detail: `Cannot accept job in status ${job.status}` },
+        { ok: false, error: "Conflict", detail: `Cannot confirm pickup for job in status ${job.status}` },
         { status: 409 },
       );
     }
@@ -43,14 +44,14 @@ export async function POST(
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.transportJob.update({
         where: { id },
-        data: { status: TransportJobStatus.ACCEPTED },
+        data: { status: TransportJobStatus.PICKUP_CONFIRMED },
       });
       await tx.decisionLog.create({
         data: {
           jobId: id,
-          action: DecisionAction.ACCEPT as any,
+          action: DecisionAction.PICKUP_CONFIRM as any,
           actor,
-          reason: "carrier_accepted",
+          reason: note ?? "pickup_confirmed",
         },
       });
       return result;

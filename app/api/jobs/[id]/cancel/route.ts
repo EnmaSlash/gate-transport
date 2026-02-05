@@ -18,8 +18,23 @@ export async function POST(
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const actor = typeof body?.actor === "string" ? body.actor : "unknown";
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "BadRequest", detail: "Body must be valid JSON" },
+        { status: 400 },
+      );
+    }
+
+    const actor = typeof body.actor === "string" ? body.actor : "unknown";
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+
+    if (!reason) {
+      return NextResponse.json(
+        { ok: false, error: "BadRequest", detail: "reason is required for cancellations" },
+        { status: 400 },
+      );
+    }
 
     const job = await prisma.transportJob.findUnique({
       where: { id },
@@ -33,30 +48,31 @@ export async function POST(
       );
     }
 
-    if (!isValidTransition(job.status, TransportJobStatus.ACCEPTED)) {
+    if (!isValidTransition(job.status, TransportJobStatus.CANCELLED)) {
       return NextResponse.json(
-        { ok: false, error: "Conflict", detail: `Cannot accept job in status ${job.status}` },
+        { ok: false, error: "Conflict", detail: `Cannot cancel job in status ${job.status}` },
         { status: 409 },
       );
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const result = await tx.transportJob.update({
+    const previousStatus = job.status;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.transportJob.update({
         where: { id },
-        data: { status: TransportJobStatus.ACCEPTED },
+        data: { status: TransportJobStatus.CANCELLED },
       });
       await tx.decisionLog.create({
         data: {
           jobId: id,
-          action: DecisionAction.ACCEPT as any,
+          action: DecisionAction.CANCEL as any,
           actor,
-          reason: "carrier_accepted",
+          reason,
         },
       });
-      return result;
     });
 
-    return NextResponse.json({ ok: true, jobId: id, job: updated });
+    return NextResponse.json({ ok: true, jobId: id, previousStatus });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: "ServerError", detail: err?.message ?? "Unknown error" },

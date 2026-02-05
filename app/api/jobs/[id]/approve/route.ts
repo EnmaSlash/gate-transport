@@ -4,6 +4,7 @@ import {
   PaymentHoldStatus,
   TransportJobStatus,
   DecisionAction,
+  isValidTransition,
 } from "@/lib/domain";
 import { runGateEvaluation } from "@/lib/evaluateGate";
 
@@ -34,12 +35,7 @@ export async function POST(
       );
     }
 
-    const blockedJobStatuses: string[] = [
-      TransportJobStatus.CANCELLED,
-      TransportJobStatus.DISPUTED,
-      TransportJobStatus.RELEASED,
-    ];
-    if (blockedJobStatuses.includes(job.status)) {
+    if (!isValidTransition(job.status, TransportJobStatus.RELEASABLE)) {
       return NextResponse.json(
         {
           ok: false,

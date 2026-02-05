@@ -18,8 +18,17 @@ export async function POST(
   }
 
   try {
-    const body = await req.json().catch(() => ({}));
-    const actor = typeof body?.actor === "string" ? body.actor : "unknown";
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "BadRequest", detail: "Body must be valid JSON" },
+        { status: 400 },
+      );
+    }
+
+    const actor = typeof body.actor === "string" ? body.actor : "unknown";
+    const carrierName = typeof body.carrierName === "string" ? body.carrierName : undefined;
+    const carrierEmail = typeof body.carrierEmail === "string" ? body.carrierEmail : undefined;
 
     const job = await prisma.transportJob.findUnique({
       where: { id },
@@ -33,9 +42,9 @@ export async function POST(
       );
     }
 
-    if (!isValidTransition(job.status, TransportJobStatus.ACCEPTED)) {
+    if (!isValidTransition(job.status, TransportJobStatus.ASSIGNED)) {
       return NextResponse.json(
-        { ok: false, error: "Conflict", detail: `Cannot accept job in status ${job.status}` },
+        { ok: false, error: "Conflict", detail: `Cannot assign job in status ${job.status}` },
         { status: 409 },
       );
     }
@@ -43,14 +52,18 @@ export async function POST(
     const updated = await prisma.$transaction(async (tx) => {
       const result = await tx.transportJob.update({
         where: { id },
-        data: { status: TransportJobStatus.ACCEPTED },
+        data: {
+          status: TransportJobStatus.ASSIGNED,
+          ...(carrierName !== undefined && { carrierName }),
+          ...(carrierEmail !== undefined && { carrierEmail }),
+        },
       });
       await tx.decisionLog.create({
         data: {
           jobId: id,
-          action: DecisionAction.ACCEPT as any,
+          action: DecisionAction.ASSIGN as any,
           actor,
-          reason: "carrier_accepted",
+          reason: "assignment",
         },
       });
       return result;
