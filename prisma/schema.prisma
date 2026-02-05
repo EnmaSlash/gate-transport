@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+enum JobStatus {
+  DRAFT
+  ASSIGNED
+  ACCEPTED
+  PICKUP_CONFIRMED
+  DELIVERY_SUBMITTED
+  RELEASABLE
+  RELEASED
+  DISPUTED
+  CANCELLED
+}
+
+enum ApprovalMode {
+  auto
+  manual
+}
+
+enum EvidenceType {
+  pickup_photo
+  delivery_photo
+  vin_scan
+  pod
+  note
+}
+
+enum PaymentRail {
+  stripe
+  ach
+  balance
+}
+
+enum PaymentStatus {
+  held
+  releasable
+  released
+}
+
+enum DecisionAction {
+  approve
+  dispute
+  release
+  cancel
+  override
+  evaluate
+}
+
+model Gate {
+  id                   String       @id @default(uuid())
+  requirePickupPhotos   Boolean      @default(true)
+  requireDeliveryPhotos Boolean      @default(true)
+  requireVin            Boolean      @default(true)
+  requirePod            Boolean      @default(false)
+  minPickupPhotos       Int          @default(4)
+  minDeliveryPhotos     Int          @default(4)
+  approvalMode          ApprovalMode @default(manual)
+  createdAt             DateTime     @default(now())
+  jobs                  TransportJob[]
+}
+
+model TransportJob {
+  id                String     @id @default(uuid())
+  vin               String
+  pickupAddress     String
+  dropoffAddress    String
+  priceCents        Int
+  pickupWindowStart DateTime?
+  pickupWindowEnd   DateTime?
+  deliveryDeadline  DateTime?
+  carrierName       String?
+  carrierEmail      String?
+  status            JobStatus  @default(DRAFT)
+  gateId            String
+  gate              Gate       @relation(fields: [gateId], references: [id])
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  paymentHold       PaymentHold?
+  evidence          Evidence[]
+  decisions         DecisionLog[]
+}
+
+model PaymentHold {
+  id          String        @id @default(uuid())
+  jobId       String        @unique
+  job         TransportJob  @relation(fields: [jobId], references: [id])
+  amountCents Int
+  rail        PaymentRail
+  status      PaymentStatus @default(held)
+  providerRef String?
+  createdAt   DateTime      @default(now())
+}
+
+model Evidence {
+  id          String       @id @default(uuid())
+  jobId       String
+  job         TransportJob @relation(fields: [jobId], references: [id])
+  type        EvidenceType
+  fileUrl     String?
+  note        String?
+  timestamp   DateTime     @default(now())
+  gpsLat      Float?
+  gpsLng      Float?
+  submittedBy String?
+  createdAt   DateTime     @default(now())
+}
+
+model DecisionLog {
+  id               String         @id @default(uuid())
+  jobId            String
+  job              TransportJob   @relation(fields: [jobId], references: [id])
+  action           DecisionAction
+  actor            String
+  reason           String?
+  evidenceSnapshot Json?
+  createdAt        DateTime       @default(now())
+}
