@@ -10,6 +10,53 @@ import {
   isValidApprovalMode,
 } from "@/lib/domain";
 
+const JOB_STATUSES = Object.values(TransportJobStatus) as string[];
+
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const status = url.searchParams.get("status");
+    const carrier = url.searchParams.get("carrier");
+    const cursor = url.searchParams.get("cursor");
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 100);
+
+    if (status && !JOB_STATUSES.includes(status)) {
+      return NextResponse.json(
+        { ok: false, error: "BadRequest", detail: { message: "Invalid status filter", valid: JOB_STATUSES } },
+        { status: 400 },
+      );
+    }
+
+    const where: Record<string, unknown> = {};
+    if (status) where.status = status;
+    if (carrier) where.carrierName = { contains: carrier, mode: "insensitive" };
+
+    const jobs = await prisma.transportJob.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      include: { paymentHold: { select: { status: true, amountCents: true, rail: true } } },
+    });
+
+    const hasMore = jobs.length > limit;
+    const results = hasMore ? jobs.slice(0, limit) : jobs;
+    const nextCursor = hasMore ? results[results.length - 1].id : null;
+
+    return NextResponse.json({
+      ok: true,
+      count: results.length,
+      nextCursor,
+      jobs: results,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { ok: false, error: "ServerError", detail: err?.message ?? "Unknown error" },
+      { status: 500 },
+    );
+  }
+}
+
 function jsonError(status: number, error: string, detail: any, hint?: string) {
   return NextResponse.json({ ok: false, error, detail, hint }, { status });
 }
