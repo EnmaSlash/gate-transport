@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { prisma } from "@/lib/prisma";
 import { TransportJobStatus } from "@/lib/domain";
 
 export const runtime = "nodejs";
@@ -18,7 +18,7 @@ export async function POST(
     );
   }
 
-  const exists = await db.transportJob.findUnique({
+  const exists = await prisma.transportJob.findUnique({
     where: { id },
     select: { id: true, status: true },
   });
@@ -27,7 +27,7 @@ export async function POST(
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
-  const job = await db.transportJob.update({
+  const job = await prisma.transportJob.update({
     where: { id },
     data: { status: TransportJobStatus.ACCEPTED },
   });

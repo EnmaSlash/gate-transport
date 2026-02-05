@@ -1,5 +1,5 @@
 import { DecisionAction } from "@prisma/client";
-import { db } from "./db";
+import { prisma } from "./prisma";
 
 export async function audit(params: {
   jobId: string;
@@ -8,7 +8,7 @@ export async function audit(params: {
   reason?: string;
   evidenceSnapshot?: unknown;
 }) {
-  return db.decisionLog.create({
+  return prisma.decisionLog.create({
     data: {
       jobId: params.jobId,
       action: params.action,
