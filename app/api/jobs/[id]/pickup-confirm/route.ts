@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { TransportJobStatus, DecisionAction, isValidTransition } from "@/lib/domain";
+import { requireAuth, formatActor } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -17,9 +18,12 @@ export async function POST(
     );
   }
 
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+  const actor = formatActor(auth);
+
   try {
     const body = await req.json().catch(() => ({}));
-    const actor = typeof body?.actor === "string" ? body.actor : "unknown";
     const note = typeof body?.note === "string" ? body.note : undefined;
 
     const job = await prisma.transportJob.findUnique({

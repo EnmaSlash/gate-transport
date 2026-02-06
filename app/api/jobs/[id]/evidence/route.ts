@@ -5,6 +5,7 @@ import {
   EvidenceType,
   isValidEvidenceType,
 } from "@/lib/domain";
+import { requireAuth, formatActor } from "@/lib/auth";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -39,6 +40,10 @@ function parseMeta(meta: unknown): { gpsLat?: number; gpsLng?: number; submitted
 }
 
 export async function POST(req: Request, context: Ctx) {
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+  const submitter = formatActor(auth);
+
   try {
     const { id: jobId } = await context.params;
 
@@ -162,7 +167,7 @@ export async function POST(req: Request, context: Ctx) {
         continue;
       }
 
-      const { gpsLat, gpsLng, submittedBy } = parseMeta(it.meta);
+      const { gpsLat, gpsLng } = parseMeta(it.meta);
       toCreate.push({
         jobId,
         type,
@@ -170,7 +175,7 @@ export async function POST(req: Request, context: Ctx) {
         note,
         gpsLat: gpsLat ?? null,
         gpsLng: gpsLng ?? null,
-        submittedBy: submittedBy ?? null,
+        submittedBy: submitter,
       });
       existingKeys.add(dedupeKey);
     }

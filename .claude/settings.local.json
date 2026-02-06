@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where:*)",
+      "Bash(where.exe:*)",
+      "Bash(export PATH=\"/c/Program Files/GitHub CLI:$PATH\")",
+      "Bash(gh:*)",
+      "Bash(npx prisma migrate deploy:*)",
+      "Bash(npx ts-node:*)",
+      "Bash(npm run dev:*)",
+      "Bash(curl:*)",
+      "Bash(python -m json.tool:*)",
+      "Bash(JOB_ID=\"4a61c4dd-7ef6-443e-8644-9edf4c2ae72e\")",
+      "Bash(echo:*)",
+      "Bash(node:*)",
+      "Bash(bash:*)",
+      "Bash(npm test:*)",
+      "Bash(npx vitest run)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRemove duplicate db client and legacy gate module\n\nConsolidate on lib/prisma.ts as the single Prisma client export,\nupdate lib/audit.ts and accept route to use it, and delete the\nunused lib/gate.ts \\(superseded by lib/evaluateGate.ts\\).\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git commit:*)",
+      "Bash(npx prisma migrate dev:*)",
+      "Bash(npx next build)",
+      "Bash(npm install:*)",
+      "Bash(cd:*)",
+      "Bash(npx next dev:*)",
+      "Bash(powershell:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(npx prisma db push:*)",
+      "Bash(npx tsx:*)",
+      "Bash(git -C C:Usersbashagate-transport status)"
+    ]
+  }
+}

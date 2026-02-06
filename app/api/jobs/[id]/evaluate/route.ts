@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { DecisionAction } from "@/lib/domain";
 import { runGateEvaluation } from "@/lib/evaluateGate";
+import { requireAuth, formatActor } from "@/lib/auth";
 
 type Ctx = { params?: Promise<{ id: string }> | { id: string } };
 
@@ -24,6 +25,10 @@ async function getJobId(req: Request, context: Ctx): Promise<string | null> {
 }
 
 export async function POST(req: Request, context: Ctx) {
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+  const actor = formatActor(auth);
+
   const jobId = await getJobId(req, context);
   if (!jobId) {
     return NextResponse.json(
@@ -66,7 +71,7 @@ export async function POST(req: Request, context: Ctx) {
       data: {
         jobId,
         action: DecisionAction.EVALUATE,
-        actor: "evaluate-api",
+        actor,
         reason: result.code,
         evidenceSnapshot: {
           code: logCode,

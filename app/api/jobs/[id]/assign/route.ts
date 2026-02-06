@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { TransportJobStatus, DecisionAction, isValidTransition } from "@/lib/domain";
+import { requireAuth, formatActor } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -17,18 +18,14 @@ export async function POST(
     );
   }
 
-  try {
-    const body = await req.json().catch(() => null);
-    if (!body || typeof body !== "object") {
-      return NextResponse.json(
-        { ok: false, error: "BadRequest", detail: "Body must be valid JSON" },
-        { status: 400 },
-      );
-    }
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+  const actor = formatActor(auth);
 
-    const actor = typeof body.actor === "string" ? body.actor : "unknown";
-    const carrierName = typeof body.carrierName === "string" ? body.carrierName : undefined;
-    const carrierEmail = typeof body.carrierEmail === "string" ? body.carrierEmail : undefined;
+  try {
+    const body = await req.json().catch(() => ({}));
+    const carrierName = typeof body?.carrierName === "string" ? body.carrierName : undefined;
+    const carrierEmail = typeof body?.carrierEmail === "string" ? body.carrierEmail : undefined;
 
     const job = await prisma.transportJob.findUnique({
       where: { id },

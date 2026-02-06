@@ -7,11 +7,16 @@ import {
   isValidTransition,
 } from "@/lib/domain";
 import { runGateEvaluation } from "@/lib/evaluateGate";
+import { requireAuth, formatActor } from "@/lib/auth";
 
 export async function POST(
   req: Request,
   ctx: { params: Promise<{ id: string }> }
 ) {
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+  const actor = formatActor(auth);
+
   try {
     const { id: jobId } = await ctx.params;
     if (!jobId) {
@@ -20,9 +25,6 @@ export async function POST(
         { status: 400 }
       );
     }
-
-    const body = await req.json().catch(() => ({}));
-    const actor = typeof body?.actor === "string" ? body.actor : "unknown";
 
     const job = await prisma.transportJob.findUnique({
       where: { id: jobId },

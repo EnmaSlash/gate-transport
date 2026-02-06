@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireAuth } from "@/lib/auth";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+
   const { id } = await ctx.params;
 
   if (!id || typeof id !== "string") {

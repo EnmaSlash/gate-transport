@@ -56,6 +56,39 @@ enum DecisionAction {
   accept
   pickup_confirm
   delivery_submit
+  redact_evidence
+  retention_cleanup
+}
+
+enum UserRole {
+  admin
+  shipper
+  carrier
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  name      String
+  role      UserRole
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  apiKeys   ApiKey[]
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  keyHash    String    @unique
+  keyPrefix  String
+  label      String    @default("")
+  active     Boolean   @default(true)
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
 }
 
 model Gate {
@@ -105,17 +138,20 @@ model PaymentHold {
 }
 
 model Evidence {
-  id          String       @id @default(uuid())
-  jobId       String
-  job         TransportJob @relation(fields: [jobId], references: [id])
-  type        EvidenceType
-  fileUrl     String?
-  note        String?
-  timestamp   DateTime     @default(now())
-  gpsLat      Float?
-  gpsLng      Float?
-  submittedBy String?
-  createdAt   DateTime     @default(now())
+  id            String       @id @default(uuid())
+  jobId         String
+  job           TransportJob @relation(fields: [jobId], references: [id])
+  type          EvidenceType
+  fileUrl       String?
+  note          String?
+  timestamp     DateTime     @default(now())
+  gpsLat        Float?
+  gpsLng        Float?
+  submittedBy   String?
+  redactedAt    DateTime?
+  redactedBy    String?
+  redactReason  String?
+  createdAt     DateTime     @default(now())
 }
 
 model DecisionLog {

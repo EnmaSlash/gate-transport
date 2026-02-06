@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { TransportJobStatus, DecisionAction, isValidTransition } from "@/lib/domain";
+import { requireAuth, formatActor } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,10 @@ export async function POST(
     );
   }
 
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+  const actor = formatActor(auth);
+
   try {
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {
@@ -26,7 +31,6 @@ export async function POST(
       );
     }
 
-    const actor = typeof body.actor === "string" ? body.actor : "unknown";
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";
 
     if (!reason) {

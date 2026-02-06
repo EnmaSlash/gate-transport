@@ -69,6 +69,8 @@ export const DecisionAction = {
   ACCEPT: "accept",
   PICKUP_CONFIRM: "pickup_confirm",
   DELIVERY_SUBMIT: "delivery_submit",
+  REDACT_EVIDENCE: "redact_evidence",
+  RETENTION_CLEANUP: "retention_cleanup",
 } as const;
 
 export type DecisionActionValue =
@@ -104,6 +106,26 @@ export function isValidPaymentRail(s: string): s is PaymentRailValue {
 
 export function isValidApprovalMode(s: string): s is ApprovalModeValue {
   return s === ApprovalMode.AUTO || s === ApprovalMode.MANUAL;
+}
+
+// ----- Retention -----
+
+const PHOTO_TYPES: readonly string[] = [
+  EvidenceType.PICKUP_PHOTO,
+  EvidenceType.DELIVERY_PHOTO,
+];
+
+export function getRetentionDays(evidenceType: string): number {
+  if (PHOTO_TYPES.includes(evidenceType)) {
+    return Number(process.env.RETENTION_DAYS_PHOTOS) || 30;
+  }
+  return Number(process.env.RETENTION_DAYS_TEXT) || 90;
+}
+
+export function isExpired(evidenceType: string, createdAt: Date): boolean {
+  const days = getRetentionDays(evidenceType);
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return createdAt < cutoff;
 }
 
 // ----- State machine: valid transitions -----

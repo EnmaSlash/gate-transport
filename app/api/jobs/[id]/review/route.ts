@@ -5,6 +5,7 @@ import {
   PaymentHoldStatus,
   ApprovalMode,
 } from "@/lib/domain";
+import { requireAuth } from "@/lib/auth";
 
 type EvidenceTypeCount = Record<string, number>;
 
@@ -51,6 +52,9 @@ function buildMissing(gate: any, counts: EvidenceTypeCount, job: any) {
 }
 
 export async function GET(req: Request, context: any) {
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+
   // Next 16: context.params can be a Promise -> MUST await it
   let fromParams: string | null = null;
   try {
@@ -99,10 +103,12 @@ export async function GET(req: Request, context: any) {
       where: { jobId },
       orderBy: { createdAt: "desc" },
       take: 200,
-      select: { id: true, type: true, createdAt: true },
+      select: { id: true, type: true, fileUrl: true, note: true, redactedAt: true, redactedBy: true, redactReason: true, createdAt: true },
     });
 
-    const counts = getCounts(evidence);
+    // Only count non-redacted evidence for gate evaluation
+    const activeEvidence = evidence.filter((e) => !e.redactedAt);
+    const counts = getCounts(activeEvidence);
     const missing = buildMissing(gate, counts, job);
     const complete = missing.length === 0;
 

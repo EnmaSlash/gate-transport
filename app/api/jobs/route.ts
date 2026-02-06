@@ -9,10 +9,14 @@ import {
   isValidPaymentRail,
   isValidApprovalMode,
 } from "@/lib/domain";
+import { requireAuth } from "@/lib/auth";
 
 const JOB_STATUSES = Object.values(TransportJobStatus) as string[];
 
 export async function GET(req: Request) {
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const url = new URL(req.url);
     const status = url.searchParams.get("status");
@@ -20,7 +24,8 @@ export async function GET(req: Request) {
     const cursor = url.searchParams.get("cursor");
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 20, 1), 100);
 
-    if (status && !JOB_STATUSES.includes(status)) {
+    const statuses = status ? status.split(",") : [];
+    if (statuses.length && !statuses.every((s) => JOB_STATUSES.includes(s))) {
       return NextResponse.json(
         { ok: false, error: "BadRequest", detail: { message: "Invalid status filter", valid: JOB_STATUSES } },
         { status: 400 },
@@ -28,7 +33,8 @@ export async function GET(req: Request) {
     }
 
     const where: Record<string, unknown> = {};
-    if (status) where.status = status;
+    if (statuses.length === 1) where.status = statuses[0];
+    else if (statuses.length > 1) where.status = { in: statuses };
     if (carrier) where.carrierName = { contains: carrier, mode: "insensitive" };
 
     const jobs = await prisma.transportJob.findMany({
@@ -62,6 +68,9 @@ function jsonError(status: number, error: string, detail: any, hint?: string) {
 }
 
 export async function POST(req: Request) {
+  const auth = requireAuth(req);
+  if (auth instanceof NextResponse) return auth;
+
   try {
     const body = await req.json().catch(() => null);
 
