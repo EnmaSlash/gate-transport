@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3010 --hostname 127.0.0.1",
+    "dev": "node api.js && next dev --port 3010 --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start",
+    "start": "node api.js && next start",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
