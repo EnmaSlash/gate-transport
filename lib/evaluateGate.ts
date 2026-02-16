@@ -16,7 +16,7 @@ export type GateForEvaluate = {
   minDeliveryPhotos: number;
 };
 
-/** Minimal evidence shape (type + note for VIN match). */
+/** Minimal evidence shape (type + note). */
 export type EvidenceForEvaluate = Array<{ type: string; note: string | null }>;
 
 export type GateEvaluationResult = {
@@ -47,6 +47,7 @@ export function runGateEvaluation(
 
   const pickupCount = counts[EvidenceType.PICKUP_PHOTO] ?? 0;
   const deliveryCount = counts[EvidenceType.DELIVERY_PHOTO] ?? 0;
+  const vinPhotoCount = counts[EvidenceType.VIN_PHOTO] ?? 0;
   const vinScanCount = counts[EvidenceType.VIN_SCAN] ?? 0;
   const podCount = counts[EvidenceType.POD] ?? 0;
   const noteCount = counts[EvidenceType.NOTE] ?? 0;
@@ -76,19 +77,10 @@ export function runGateEvaluation(
   }
 
   if (code === "PASS" && gate.requireVin) {
-    const jobVin = String(job.vin ?? "").trim();
-    const vinEvidence = evidence.filter((e) => e.type === EvidenceType.VIN_SCAN);
-    if (vinEvidence.length === 0) {
-      code = "BLOCKED_MISSING_VIN";
-      missing.push("vin_scan(1 required)");
-    } else {
-      const hasMatchingVin = vinEvidence.some(
-        (e) => e.note != null && String(e.note).trim() === jobVin
-      );
-      if (!hasMatchingVin) {
-        code = "BLOCKED_VIN_MISMATCH";
-        missing.push("vin_scan(must match job.vin)");
-      }
+    const vinPhotoEvidence = evidence.filter((e) => e.type === EvidenceType.VIN_PHOTO);
+    if (vinPhotoEvidence.length === 0) {
+      code = "BLOCKED_MISSING_VIN_PHOTO";
+      missing.push("vin_photo(1 required)");
     }
   }
 
@@ -108,6 +100,7 @@ export function runGateEvaluation(
     counts: {
       [EvidenceType.PICKUP_PHOTO]: pickupCount,
       [EvidenceType.DELIVERY_PHOTO]: deliveryCount,
+      [EvidenceType.VIN_PHOTO]: vinPhotoCount,
       [EvidenceType.VIN_SCAN]: vinScanCount,
       [EvidenceType.POD]: podCount,
       [EvidenceType.NOTE]: noteCount,

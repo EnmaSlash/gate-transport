@@ -3,7 +3,7 @@ import { jwtVerify } from "jose";
 
 export const runtime = "nodejs";
 
-const PUBLIC_PATHS = new Set(["/api/auth/login"]);
+const PUBLIC_PATHS = new Set(["/api/auth/login", "/api/health"]);
 
 function getJwtSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
@@ -25,6 +25,12 @@ export async function middleware(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.slice(7);
+    // Carrier tokens are opaque (no dots). JWTs contain dots.
+    // If it doesn't look like a JWT, let the request through so
+    // route handlers can validate carrier tokens (job-scoped links).
+    if (!token.includes(".")) {
+      return NextResponse.next();
+    }
     try {
       const { payload } = await jwtVerify(token, getJwtSecret(), {
         issuer: process.env.JWT_ISSUER ?? "gate-transport",

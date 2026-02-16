@@ -17,7 +17,7 @@ import { PrismaClient, type DecisionAction } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const PHOTO_TYPES = ["pickup_photo", "delivery_photo"];
+const PHOTO_TYPES = ["pickup_photo", "delivery_photo", "vin_photo"];
 
 function getRetentionDays(evidenceType: string): number {
   if (PHOTO_TYPES.includes(evidenceType)) {
@@ -61,7 +61,7 @@ async function main() {
     where: {
       redactedAt: null,
       fileUrl: { not: null },
-      type: { in: ["pickup_photo", "delivery_photo"] as any },
+      type: { in: ["pickup_photo", "delivery_photo", "vin_photo"] as any },
       createdAt: { lt: photoCutoff },
     },
     take: limit,

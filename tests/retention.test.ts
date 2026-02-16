@@ -29,7 +29,12 @@ describe("getRetentionDays", () => {
     expect(getRetentionDays("delivery_photo")).toBe(30);
   });
 
-  it("returns 90 for vin_scan by default", () => {
+  it("returns 30 for vin_photo by default", () => {
+    delete process.env.RETENTION_DAYS_PHOTOS;
+    expect(getRetentionDays("vin_photo")).toBe(30);
+  });
+
+  it("returns 90 for vin_scan by default (text evidence)", () => {
     delete process.env.RETENTION_DAYS_TEXT;
     expect(getRetentionDays("vin_scan")).toBe(90);
   });

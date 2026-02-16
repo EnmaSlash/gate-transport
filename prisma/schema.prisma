@@ -28,6 +28,7 @@ enum ApprovalMode {
 enum EvidenceType {
   pickup_photo
   delivery_photo
+  vin_photo
   vin_scan
   pod
   note
@@ -56,8 +57,16 @@ enum DecisionAction {
   accept
   pickup_confirm
   delivery_submit
+  evidence_upload
+  notification_sent
   redact_evidence
   retention_cleanup
+}
+
+enum NotificationStatus {
+  queued
+  sent
+  failed
 }
 
 enum UserRole {
@@ -76,6 +85,7 @@ model User {
   updatedAt DateTime  @updatedAt
 
   apiKeys   ApiKey[]
+  carrierInvitesCreated CarrierInvite[]
 }
 
 model ApiKey {
@@ -124,6 +134,57 @@ model TransportJob {
   paymentHold       PaymentHold?
   evidence          Evidence[]
   decisions         DecisionLog[]
+  carrierInvite     CarrierInvite?
+  notifications     NotificationOutbox[]
+}
+
+model CarrierInvite {
+  id           String       @id @default(uuid())
+  jobId        String       @unique
+  job          TransportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  tokenHash    String       @unique
+  issuedAt     DateTime     @default(now())
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  useCount     Int          @default(0)
+
+  carrierName  String?
+  carrierPhone String?
+  carrierEmail String?
+
+  createdByUserId String?
+  createdByUser   User?     @relation(fields: [createdByUserId], references: [id])
+
+  notifications   NotificationOutbox[]
+
+  @@index([jobId])
+  @@index([tokenHash])
+}
+
+model NotificationOutbox {
+  id        String             @id @default(uuid())
+  type      String
+  status    NotificationStatus @default(queued)
+
+  jobId     String
+  job       TransportJob       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  inviteId  String?
+  invite    CarrierInvite?     @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+
+  toPhone   String?
+  toEmail   String?
+  payload   Json
+
+  attempts  Int                @default(0)
+  lastError String?
+  createdAt DateTime           @default(now())
+  sentAt    DateTime?
+
+  @@index([status, createdAt])
+  @@index([jobId])
 }
 
 model PaymentHold {
@@ -133,7 +194,9 @@ model PaymentHold {
   amountCents Int
   rail        PaymentRail
   status      PaymentStatus @default(held)
+  provider    String?
   providerRef String?
+  idempotencyKey String?
   createdAt   DateTime      @default(now())
 }
 
