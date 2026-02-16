@@ -36,6 +36,7 @@ describe("checkAuthorization", () => {
       ["POST", "/api/jobs/550e8400-e29b-41d4-a716-446655440000/accept"],
       ["POST", "/api/jobs/550e8400-e29b-41d4-a716-446655440000/release"],
       ["POST", "/api/admin/users"],
+      ["POST", "/api/admin/outbox/drain"],
       ["GET", "/api/admin/users"],
       ["GET", "/api/notifications/delivery"],
     ])("%s %s → allowed", (method, path) => {
@@ -65,6 +66,7 @@ describe("checkAuthorization", () => {
       ["POST", "/api/jobs/550e8400-e29b-41d4-a716-446655440000/evidence"],
       ["POST", "/api/jobs/550e8400-e29b-41d4-a716-446655440000/release"],
       ["POST", "/api/admin/users"],
+      ["POST", "/api/admin/outbox/drain"],
     ])("%s %s → denied", (method, path) => {
       expect(checkAuthorization(method, path, shipper).allowed).toBe(false);
     });
@@ -91,6 +93,7 @@ describe("checkAuthorization", () => {
       ["POST", "/api/jobs/550e8400-e29b-41d4-a716-446655440000/release"],
       ["POST", "/api/jobs/550e8400-e29b-41d4-a716-446655440000/dispute"],
       ["POST", "/api/admin/users"],
+      ["POST", "/api/admin/outbox/drain"],
       ["GET", "/api/notifications/delivery"],
     ])("%s %s → denied", (method, path) => {
       expect(checkAuthorization(method, path, carrier).allowed).toBe(false);

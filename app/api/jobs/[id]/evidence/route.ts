@@ -4,8 +4,10 @@ import { prisma } from "@/lib/prisma";
 import {
   EvidenceType,
   isValidEvidenceType,
+  DecisionAction,
 } from "@/lib/domain";
-import { requireAuth, formatActor } from "@/lib/auth";
+import { getAuthFromHeaders, requireAuth, formatActor } from "@/lib/auth";
+import { requireCarrierAuth } from "@/lib/authCarrier";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -13,11 +15,11 @@ type Ctx = { params: Promise<{ id: string }> };
 const PHOTO_TYPES: readonly string[] = [
   EvidenceType.PICKUP_PHOTO,
   EvidenceType.DELIVERY_PHOTO,
+  EvidenceType.VIN_PHOTO,
 ];
 
 /** Types that require value (stored in note). */
 const VALUE_TYPES: readonly string[] = [
-  EvidenceType.VIN_SCAN,
   EvidenceType.POD,
   EvidenceType.NOTE,
 ];
@@ -40,10 +42,6 @@ function parseMeta(meta: unknown): { gpsLat?: number; gpsLng?: number; submitted
 }
 
 export async function POST(req: Request, context: Ctx) {
-  const auth = requireAuth(req);
-  if (auth instanceof NextResponse) return auth;
-  const submitter = formatActor(auth);
-
   try {
     const { id: jobId } = await context.params;
 
@@ -54,11 +52,26 @@ export async function POST(req: Request, context: Ctx) {
       );
     }
 
-    const jobExists = await prisma.transportJob.findUnique({
+    const headerUser = getAuthFromHeaders(req);
+    let submitter: string;
+    let carrier: { reason: string } | null = null;
+
+    if (headerUser) {
+      const auth = requireAuth(req);
+      if (auth instanceof NextResponse) return auth;
+      submitter = formatActor(auth);
+    } else {
+      const carrierAuth = await requireCarrierAuth(req, jobId);
+      if (carrierAuth instanceof NextResponse) return carrierAuth;
+      submitter = carrierAuth.actor;
+      carrier = carrierAuth;
+    }
+
+    const job = await prisma.transportJob.findUnique({
       where: { id: jobId },
-      select: { id: true },
+      select: { id: true, vin: true },
     });
-    if (!jobExists) {
+    if (!job) {
       return NextResponse.json(
         { ok: false, jobId, error: "Job not found" },
         { status: 404 }
@@ -125,6 +138,8 @@ export async function POST(req: Request, context: Ctx) {
       );
     }
 
+    // VIN proof is photo evidence (vin_photo). Any optional text entries are treated as notes.
+
     const existing = await prisma.evidence.findMany({
       where: { jobId },
       select: { type: true, fileUrl: true, note: true },
@@ -180,9 +195,21 @@ export async function POST(req: Request, context: Ctx) {
       existingKeys.add(dedupeKey);
     }
 
-    if (toCreate.length) {
-      await prisma.evidence.createMany({ data: toCreate });
-    }
+    await prisma.$transaction(async (tx) => {
+      if (toCreate.length) {
+        await tx.evidence.createMany({ data: toCreate });
+      }
+      await tx.decisionLog.create({
+        data: {
+          jobId,
+          action: DecisionAction.EVIDENCE_UPLOAD as any,
+          actor: submitter,
+          reason: carrier
+            ? `${carrier.reason} | inserted=${toCreate.length} skipped=${skipped}`
+            : `inserted=${toCreate.length} skipped=${skipped}`,
+        },
+      });
+    });
 
     const allEvidence = await prisma.evidence.findMany({
       where: { jobId },
