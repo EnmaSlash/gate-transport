@@ -5,7 +5,8 @@ import {
   PaymentHoldStatus,
   ApprovalMode,
 } from "@/lib/domain";
-import { requireAuth } from "@/lib/auth";
+import { getAuthFromHeaders, requireAuth } from "@/lib/auth";
+import { requireCarrierAuth } from "@/lib/authCarrier";
 
 type EvidenceTypeCount = Record<string, number>;
 
@@ -42,19 +43,14 @@ function buildMissing(gate: any, counts: EvidenceTypeCount, job: any) {
   }
 
   if (gate.requireVin) {
-    const jobVin = (job?.vin ?? "").toString().trim();
-    const vinEvidenceCount = counts["vin"] ?? 0;
-    const vinScanCount = counts[EvidenceType.VIN_SCAN] ?? 0;
-    if (!jobVin && vinEvidenceCount < 1 && vinScanCount < 1) missing.push("vin(1 required)");
+    const vinPhotoCount = counts[EvidenceType.VIN_PHOTO] ?? 0;
+    if (vinPhotoCount < 1) missing.push("vin_photo(1 required)");
   }
 
   return missing;
 }
 
 export async function GET(req: Request, context: any) {
-  const auth = requireAuth(req);
-  if (auth instanceof NextResponse) return auth;
-
   // Next 16: context.params can be a Promise -> MUST await it
   let fromParams: string | null = null;
   try {
@@ -79,6 +75,12 @@ export async function GET(req: Request, context: any) {
       { status: 400 }
     );
   }
+
+  const headerUser = getAuthFromHeaders(req);
+  const carrier = headerUser ? null : await requireCarrierAuth(req, jobId);
+  if (carrier instanceof NextResponse) return carrier;
+  const auth = headerUser ? requireAuth(req) : null;
+  if (auth instanceof NextResponse) return auth;
 
   try {
     const job = await prisma.transportJob.findUnique({ where: { id: jobId } });

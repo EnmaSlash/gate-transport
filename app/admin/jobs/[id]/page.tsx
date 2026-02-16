@@ -5,6 +5,29 @@ import {
   PageContainer, PageHeader, Card, Row, Badge, Button, Alert, Divider, ProgressBar,
 } from "@/components/ui";
 
+const SIM_BANNER_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SIM_EVIDENCE === "true";
+
+function jsonPreview(value: unknown, maxChars = 600): string {
+  if (value === null || value === undefined) return "";
+  let s = "";
+  try {
+    s = JSON.stringify(value, null, 2);
+  } catch {
+    s = String(value);
+  }
+  if (s.length <= maxChars) return s;
+  return `${s.slice(0, maxChars)}\n…`;
+}
+
+function tryParseJson(s: unknown): any | null {
+  if (typeof s !== "string") return null;
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
 function authHeaders(json = true): Record<string, string> {
   const token = typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
   const h: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -35,14 +58,28 @@ const HOLD_BADGE: Record<string, { label: string; variant: BadgeVariant }> = {
   released:   { label: "Released", variant: "green" },
 };
 
+type ActionDetailsMap = Partial<{
+  evaluation: {
+    pass: boolean;
+    code: unknown;
+    missing: unknown;
+    counts: unknown;
+  };
+  approve: unknown;
+}>;
+
 export default function AdminJobReview() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [review, setReview] = useState<any>(null);
   const [error, setError] = useState("");
   const [actionMsg, setActionMsg] = useState("");
+  const [actionDetails, setActionDetails] = useState<ActionDetailsMap>({});
+  const [health, setHealth] = useState<any>(null);
   const [reason, setReason] = useState("");
   const [carrierName, setCarrierName] = useState("");
+  const [carrierLink, setCarrierLink] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const [loading, setLoading] = useState<string | null>(null);
   const isAdmin = getUserRole() === "admin";
 
@@ -57,9 +94,16 @@ export default function AdminJobReview() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then((d) => setHealth(d))
+      .catch(() => setHealth({ ok: false, db: { ok: false, detail: "health fetch failed" } }));
+  }, []);
 
   async function doAction(endpoint: string, body: Record<string, unknown> = {}) {
     setActionMsg("");
+    setActionDetails({});
     setLoading(endpoint);
     try {
       const res = await fetch(`/api/jobs/${id}/${endpoint}`, {
@@ -67,10 +111,89 @@ export default function AdminJobReview() {
       });
       const data = await res.json();
       setActionMsg(`${endpoint}: ${data.ok ? "Success" : data.detail || data.error || "Failed"}`);
+      if (endpoint === "assign") {
+        const link = typeof data?.carrierLink === "string" ? data.carrierLink : null;
+        setCarrierLink(data.ok && link ? link : null);
+      }
       if (data.ok) { setReason(""); setCarrierName(""); }
       await load();
     } catch { setActionMsg(`${endpoint}: Network error`); }
     finally { setLoading(null); }
+  }
+
+  async function approveRunEvaluation() {
+    if (!isAdmin) return;
+    setActionMsg("");
+    setActionDetails({});
+    setLoading("approve-run-eval");
+    try {
+      const evalRes = await fetch(`/api/jobs/${id}/evaluate`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({}),
+      });
+      const evalData = await evalRes.json().catch(() => null);
+      if (!evalRes.ok || !evalData?.ok) {
+        setActionMsg(`evaluate: ${evalData?.detail || evalData?.error || "Failed"}`);
+        setActionDetails({ evaluation: { pass: false, code: evalData?.code, missing: evalData?.missing, counts: evalData?.counts } });
+        return;
+      }
+
+      // Save evaluation snapshot details for display regardless of pass/fail.
+      const evaluationSnapshot = {
+        pass: !!evalData.pass,
+        code: evalData.code,
+        missing: evalData.missing,
+        counts: evalData.counts,
+      };
+      setActionDetails({ evaluation: evaluationSnapshot });
+
+      if (!evalData.pass) {
+        const missing = Array.isArray(evalData.missing) ? evalData.missing.join(", ") : "—";
+        setActionMsg(`Blocked: ${String(evalData.code || "MISSING")} — ${missing}`);
+        return;
+      }
+
+      const approveRes = await fetch(`/api/jobs/${id}/approve`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({}),
+      });
+      const approveData = await approveRes.json().catch(() => null);
+
+      if (!approveRes.ok || !approveData?.ok) {
+        const missing = Array.isArray(approveData?.missing) ? approveData.missing.join(", ") : null;
+        const code = approveData?.code ? ` (${approveData.code})` : "";
+        setActionMsg(`approve: ${approveData?.detail || approveData?.error || "Failed"}${missing ? ` — ${missing}${code}` : code}`);
+        setActionDetails((prev) => ({ ...prev, approve: approveData }));
+        return;
+      }
+
+      setActionMsg("Approved");
+      setActionDetails((prev) => ({ ...prev, approve: approveData }));
+      await load();
+    } catch {
+      setActionMsg("Approve (run evaluation): Network error");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function copyCarrierLink() {
+    if (!carrierLink) return;
+    try {
+      await navigator.clipboard.writeText(carrierLink);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 1500);
+    } catch {
+      // Fallback for non-secure contexts / denied permissions
+      prompt("Copy carrier link:", carrierLink);
+    }
+  }
+
+  function openCarrierLink() {
+    if (!carrierLink) return;
+    window.open(carrierLink, "_blank", "noopener,noreferrer");
   }
 
   async function redactEvidence(evidenceId: string) {
@@ -124,8 +247,18 @@ export default function AdminJobReview() {
   const uploads: any[] = ev?.latestUploads ?? [];
   const pickupPhotos = uploads.filter((e: any) => e.type === "pickup_photo");
   const deliveryPhotos = uploads.filter((e: any) => e.type === "delivery_photo");
-  const vinScans = uploads.filter((e: any) => e.type === "vin_scan");
+  const vinPhotos = uploads.filter((e: any) => e.type === "vin_photo");
   const pods = uploads.filter((e: any) => e.type === "pod");
+  const latestIssue = uploads
+    .filter((e: any) => e.type === "note" && !e.redactedAt)
+    .map((e: any) => ({ e, payload: tryParseJson(e.note) }))
+    .filter((x: any) => x.payload && x.payload.kind === "issue" && typeof x.payload.message === "string")
+    .sort((a: any, b: any) => new Date(b.e.createdAt).getTime() - new Date(a.e.createdAt).getTime())[0] ?? null;
+  const decisionLogsAsc: any[] = Array.isArray(review.audit?.recent)
+    ? [...review.audit.recent].sort((a: any, b: any) => (
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      ))
+    : [];
 
   const sb = STATUS_BADGE[status] ?? { label: status, variant: "gray" as BadgeVariant };
   const hb = hold ? (HOLD_BADGE[hold.status] ?? { label: hold.status, variant: "gray" as BadgeVariant }) : null;
@@ -142,6 +275,40 @@ export default function AdminJobReview() {
           </Button>
         }
       />
+
+      {SIM_BANNER_ENABLED && (
+        <Alert variant="warning" className="mb-4">
+          <div className="font-semibold">SIMULATION MODE</div>
+          <div className="text-[12px] mt-1">
+            Simulated evidence is enabled. Carrier/dev tools may create synthetic Evidence + audit entries.
+          </div>
+        </Alert>
+      )}
+
+      <Card title="System Status" accent className="mb-4">
+        {!health ? (
+          <div className="text-[13px] text-[var(--text-tertiary)]">Loading…</div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <Badge variant={health.db?.ok ? "green" : "red"}>DB {health.db?.ok ? "OK" : "FAIL"}</Badge>
+              <Badge variant={health.r2?.ok ? "green" : "amber"}>R2 {health.r2?.ok ? "OK" : "MISSING"}</Badge>
+              <Badge variant={health.simEvidence?.enabled ? "amber" : "gray"}>
+                SIM {health.simEvidence?.enabled ? "ON" : "OFF"}
+              </Badge>
+              <Badge variant="gray">PAY {health.payment?.provider ?? "—"}</Badge>
+              <Badge variant={Number(health.outbox?.queued ?? 0) > 0 ? "amber" : "gray"}>
+                OUTBOX {health.outbox?.queued ?? 0}
+              </Badge>
+            </div>
+            {!health.r2?.ok && (
+              <Alert variant="warning">
+                Uploads disabled{health.r2?.detail ? ` — ${health.r2.detail}` : ""}
+              </Alert>
+            )}
+          </>
+        )}
+      </Card>
 
       {/* Status hero card with gradient border */}
       <div className="rounded-[var(--radius-xl)] border border-[var(--border-default)] bg-[var(--bg-surface)]
@@ -219,28 +386,15 @@ export default function AdminJobReview() {
         onRedact={redactEvidence}
       />
 
-      {/* VIN scan */}
-      <Card className="mb-4">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-7 h-7 rounded-[var(--radius-sm)] bg-[var(--brand-50)] flex items-center justify-center">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--brand-600)"
-                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="4" width="20" height="16" rx="2" />
-              <path d="M7 8h4M7 12h6M7 16h2" />
-            </svg>
-          </div>
-          <h3 className="text-[13px] font-semibold uppercase tracking-wider text-[var(--brand-600)]">VIN scan</h3>
-        </div>
-        {vinScans.length === 0 ? (
-          <EmptyState required={gate?.requireVin} label="No VIN submitted" />
-        ) : (
-          <div className="space-y-1">
-            {vinScans.map((e: any) => (
-              <EvidenceText key={e.id} evidence={e} isAdmin={isAdmin} loading={loading} onRedact={redactEvidence} mono />
-            ))}
-          </div>
-        )}
-      </Card>
+      <EvidenceSection
+        title="VIN photo"
+        icon="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"
+        items={vinPhotos}
+        required={gate?.requireVin}
+        isAdmin={isAdmin}
+        loading={loading}
+        onRedact={redactEvidence}
+      />
 
       {/* POD */}
       <Card className="mb-4">
@@ -272,6 +426,16 @@ export default function AdminJobReview() {
                       shadow-[var(--shadow-sm)] p-6 mb-4">
         <h3 className="text-[13px] font-semibold uppercase tracking-wider text-[var(--brand-600)] mb-4">Actions</h3>
 
+        {latestIssue && (
+          <Alert variant="warning" className="mb-4">
+            <div className="font-semibold">Carrier reported an issue</div>
+            <div className="text-[12px] mt-1">
+              {String(latestIssue.payload.message).slice(0, 200)}
+              {String(latestIssue.payload.message).length > 200 ? "…" : ""}
+            </div>
+          </Alert>
+        )}
+
         {canAssign && (
           <div className="flex gap-2 mb-4">
             <input
@@ -287,6 +451,36 @@ export default function AdminJobReview() {
             >
               Assign
             </Button>
+          </div>
+        )}
+
+        {/* Carrier link (available after successful assign) */}
+        {carrierLink && (
+          <div className="mb-4">
+            <div className="text-[13px] font-semibold text-[var(--text-secondary)] mb-1.5">
+              Carrier job link
+            </div>
+            <div className="flex gap-2">
+              <input
+                readOnly
+                value={carrierLink}
+                className="input flex-1 font-mono text-[12px] truncate"
+              />
+              <Button
+                variant="secondary"
+                disabled={!!loading}
+                onClick={copyCarrierLink}
+              >
+                {copyState === "copied" ? "Copied" : "Copy"}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={!!loading}
+                onClick={openCarrierLink}
+              >
+                Open
+              </Button>
+            </div>
           </div>
         )}
 
@@ -308,6 +502,15 @@ export default function AdminJobReview() {
             </svg>
             Approve
           </Button>
+          {isAdmin && (
+            <Button
+              variant="primary"
+              disabled={!!loading || !canEvaluate}
+              onClick={approveRunEvaluation}
+            >
+              Approve (run evaluation)
+            </Button>
+          )}
           <Button variant="primary" disabled={!!loading || !canRelease}
             onClick={() => doAction("release")}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -347,31 +550,107 @@ export default function AdminJobReview() {
             {actionMsg}
           </Alert>
         )}
+
+        {actionDetails.evaluation && (
+          <pre className="mt-3 text-[11px] font-mono bg-[var(--bg-muted)] border border-[var(--border-default)]
+                          rounded-[var(--radius-md)] p-3 overflow-auto max-h-56 whitespace-pre-wrap">
+            {jsonPreview(actionDetails.evaluation)}
+          </pre>
+        )}
       </div>
 
-      {/* Audit log */}
-      <Card title="Audit log" accent>
-        {review.audit?.recent?.length === 0 && (
-          <p className="text-[14px] text-[var(--text-tertiary)]">No entries yet</p>
-        )}
-        <div className="max-h-64 overflow-auto space-y-0 divide-y divide-[var(--border-subtle)]">
-          {review.audit?.recent?.map((log: any) => (
-            <div key={log.id} className="py-2.5 text-[12px] font-mono flex gap-3 items-baseline">
-              <span className="text-[var(--text-tertiary)] shrink-0">
-                {new Date(log.createdAt).toLocaleString()}
-              </span>
-              <Badge variant={log.action.includes("fail") || log.action.includes("cancel") || log.action.includes("dispute")
-                ? "red" : log.action.includes("release") || log.action.includes("approve") ? "green" : "gray"}>
-                {log.action}
-              </Badge>
-              <span className="text-[var(--text-secondary)] truncate">{log.actor}</span>
-              {log.reason && (
-                <span className="text-[var(--text-tertiary)] truncate">— {log.reason}</span>
-              )}
+      {/* Audit inspector (debug) */}
+      <details className="mb-4 rounded-[var(--radius-xl)] border border-[var(--border-default)] bg-[var(--bg-surface)] shadow-[var(--shadow-sm)]">
+        <summary className="cursor-pointer select-none px-6 py-4 flex items-center justify-between">
+          <div>
+            <div className="text-[13px] font-semibold uppercase tracking-wider text-[var(--brand-600)]">
+              Audit Inspector (debug)
             </div>
-          ))}
+            <div className="text-[12px] text-[var(--text-tertiary)] mt-0.5">
+              Decision timeline + evidence counts
+            </div>
+          </div>
+          <span className="text-[12px] text-[var(--text-tertiary)]">
+            {decisionLogsAsc.length} entries
+          </span>
+        </summary>
+
+        <div className="px-6 pb-6">
+          <Card title="Evidence counts" accent className="mb-4">
+            <div className="flex flex-wrap gap-2 mb-3">
+              <Badge variant="gray">
+                pickup_photo {(ev?.counts?.pickup_photo ?? 0)}/{gate?.requirePickupPhotos ? (gate?.minPickupPhotos ?? 0) : "—"}
+              </Badge>
+              <Badge variant="gray">
+                delivery_photo {(ev?.counts?.delivery_photo ?? 0)}/{gate?.requireDeliveryPhotos ? (gate?.minDeliveryPhotos ?? 0) : "—"}
+              </Badge>
+              <Badge variant="gray">
+                vin_photo {(ev?.counts?.vin_photo ?? 0)}/{gate?.requireVin ? 1 : "—"}
+              </Badge>
+              <Badge variant="gray">
+                pod {(ev?.counts?.pod ?? 0)}/{gate?.requirePod ? 1 : "—"}
+              </Badge>
+              <Badge variant="gray">
+                note {ev?.counts?.note ?? 0}
+              </Badge>
+            </div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+              <Row label="pickup_photo" value={String(ev?.counts?.pickup_photo ?? 0)} mono />
+              <Row label="delivery_photo" value={String(ev?.counts?.delivery_photo ?? 0)} mono />
+              <Row label="vin_photo" value={String(ev?.counts?.vin_photo ?? 0)} mono />
+              <Row label="pod" value={String(ev?.counts?.pod ?? 0)} mono />
+              <Row label="note" value={String(ev?.counts?.note ?? 0)} mono />
+              <Row label="total" value={String(ev?.total ?? 0)} mono />
+            </div>
+          </Card>
+
+          <Card title="Decision timeline" accent>
+            {decisionLogsAsc.length === 0 && (
+              <p className="text-[14px] text-[var(--text-tertiary)]">No entries yet</p>
+            )}
+            <div className="max-h-[420px] overflow-auto space-y-0 divide-y divide-[var(--border-subtle)]">
+              {decisionLogsAsc.map((log: any) => {
+                const snapshot = log?.evidenceSnapshot;
+                const action = String(log?.action ?? "");
+                const variant: BadgeVariant =
+                  action.includes("cancel") || action.includes("dispute")
+                    ? "red"
+                    : action.includes("release") || action.includes("approve")
+                      ? "green"
+                      : action.includes("evaluate") || action.includes("evidence") || action.includes("notification")
+                        ? "violet"
+                        : "gray";
+
+                return (
+                  <div key={log.id} className="py-3">
+                    <div className="flex flex-wrap gap-2 items-baseline">
+                      <span className="text-[12px] font-mono text-[var(--text-tertiary)] shrink-0">
+                        {new Date(log.createdAt).toLocaleString()}
+                      </span>
+                      <Badge variant={variant}>{log.action}</Badge>
+                      <span className="text-[12px] font-mono text-[var(--text-secondary)] truncate">
+                        {log.actor}
+                      </span>
+                      {log.reason && (
+                        <span className="text-[12px] text-[var(--text-tertiary)] truncate">
+                          — {log.reason}
+                        </span>
+                      )}
+                    </div>
+
+                    {snapshot && (
+                      <pre className="mt-2 text-[11px] font-mono bg-[var(--bg-muted)] border border-[var(--border-default)]
+                                      rounded-[var(--radius-md)] p-3 overflow-auto max-h-44 whitespace-pre-wrap">
+                        {jsonPreview(snapshot)}
+                      </pre>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
         </div>
-      </Card>
+      </details>
     </PageContainer>
   );
 }

@@ -4,9 +4,9 @@ import {
   TransportJobStatus,
   DecisionAction,
   PaymentHoldStatus,
-  isValidTransition,
 } from "@/lib/domain";
 import { requireAuth, formatActor } from "@/lib/auth";
+import { allowedFromFor, invalidTransitionPayload } from "@/lib/transitions";
 
 export const runtime = "nodejs";
 
@@ -45,33 +45,57 @@ export async function POST(
       );
     }
 
-    const job = await prisma.transportJob.findUnique({
-      where: { id },
-      include: { paymentHold: true },
-    });
-
-    if (!job) {
-      return NextResponse.json(
-        { ok: false, error: "NotFound", detail: "Job not found" },
-        { status: 404 },
-      );
-    }
-
-    if (!isValidTransition(job.status, TransportJobStatus.DISPUTED)) {
-      return NextResponse.json(
-        { ok: false, error: "Conflict", detail: `Cannot dispute job in status ${job.status}` },
-        { status: 409 },
-      );
-    }
-
-    const previousStatus = job.status;
-    let warning: string | undefined;
-
-    await prisma.$transaction(async (tx) => {
-      await tx.transportJob.update({
+    const result = await prisma.$transaction(async (tx) => {
+      const job = await tx.transportJob.findUnique({
         where: { id },
+        include: { paymentHold: true },
+      });
+
+      if (!job) {
+        return { status: 404, payload: { ok: false, error: "NotFound", detail: "Job not found" } };
+      }
+
+      const warning =
+        job.paymentHold?.status === PaymentHoldStatus.RELEASED
+          ? "Payment already released; manual recovery may be required"
+          : undefined;
+
+      if (job.status === TransportJobStatus.DISPUTED) {
+        // Avoid duplicate logs unless reason differs.
+        const last = await tx.decisionLog.findFirst({
+          where: { jobId: id, action: DecisionAction.DISPUTE as any },
+          orderBy: { createdAt: "desc" },
+          select: { reason: true },
+        });
+        if ((last?.reason ?? "") !== reason) {
+          await tx.decisionLog.create({
+            data: { jobId: id, action: DecisionAction.DISPUTE as any, actor, reason },
+          });
+        }
+        return {
+          status: 200,
+          payload: { ok: true, jobId: id, already: true, status: job.status, ...(warning && { warning }) },
+        };
+      }
+
+      const allowedFrom = allowedFromFor(TransportJobStatus.DISPUTED);
+      if (!(allowedFrom as readonly string[]).includes(job.status)) {
+        return { status: 409, payload: invalidTransitionPayload(job.status, TransportJobStatus.DISPUTED) };
+      }
+
+      const updatedCount = await tx.transportJob.updateMany({
+        where: { id, status: { in: allowedFrom as any } },
         data: { status: TransportJobStatus.DISPUTED },
       });
+
+      if (updatedCount.count !== 1) {
+        const latest = await tx.transportJob.findUnique({ where: { id }, select: { status: true } });
+        const current = latest?.status ?? "UNKNOWN";
+        if (current === TransportJobStatus.DISPUTED) {
+          return { status: 200, payload: { ok: true, jobId: id, already: true, status: current, ...(warning && { warning }) } };
+        }
+        return { status: 409, payload: invalidTransitionPayload(current, TransportJobStatus.DISPUTED) };
+      }
 
       // If payment hold is releasable, freeze it back to held
       if (job.paymentHold?.status === PaymentHoldStatus.RELEASABLE) {
@@ -82,25 +106,16 @@ export async function POST(
       }
 
       await tx.decisionLog.create({
-        data: {
-          jobId: id,
-          action: DecisionAction.DISPUTE as any,
-          actor,
-          reason,
-        },
+        data: { jobId: id, action: DecisionAction.DISPUTE as any, actor, reason },
       });
+
+      return {
+        status: 200,
+        payload: { ok: true, jobId: id, previousStatus: job.status, ...(warning && { warning }) },
+      };
     });
 
-    if (job.paymentHold?.status === PaymentHoldStatus.RELEASED) {
-      warning = "Payment already released; manual recovery may be required";
-    }
-
-    return NextResponse.json({
-      ok: true,
-      jobId: id,
-      previousStatus,
-      ...(warning && { warning }),
-    });
+    return NextResponse.json(result.payload, { status: result.status });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: "ServerError", detail: err?.message ?? "Unknown error" },
