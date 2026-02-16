@@ -1,40 +1,41 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { authHeaders, statusRoute } from "./_components";
+import { getCarrierToken } from "./_components";
+import { PageContainer, PageHeader, Card, Alert } from "@/components/ui";
 
 export default function CarrierJobRouter() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [error, setError] = useState("");
+  const [blocked, setBlocked] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`/api/jobs/${id}`, { headers: authHeaders() });
-        const data = await res.json();
-        if (!data.ok) { setError(data.detail || data.error || "Failed to load job"); return; }
-        const status = data.job?.status ?? data.status;
-        router.replace(statusRoute(id, status));
-      } catch {
-        setError("Network error");
-      }
-    })();
+    const jwt = typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
+    if (!jwt) { setBlocked(true); return; }
+    const t = getCarrierToken();
+    setToken(t);
+    if (t) router.replace(`/c/${encodeURIComponent(t)}`);
   }, [id, router]);
 
-  if (error) {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-10">
-        <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3">
-          <p className="text-sm text-red-700">{error}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="max-w-xl mx-auto px-4 py-10">
-      <p className="text-sm text-gray-400">Loading...</p>
-    </div>
+    <PageContainer>
+      <PageHeader title="Carrier access" subtitle="Link required" />
+      {blocked ? (
+        <Alert variant="warning" className="mb-5">
+          Access requires a job link. Open the link from SMS.
+        </Alert>
+      ) : (
+        <Alert variant="info" className="mb-5">
+          {token ? "Redirecting to the token-native carrier flow…" : `Open the carrier link for job ${id}.`}
+        </Alert>
+      )}
+
+      <Card className="py-8 text-center">
+        <p className="text-sm text-[var(--text-secondary)]">
+          Carrier pages now live under <span className="font-mono">/c/&lt;token&gt;</span>.
+        </p>
+      </Card>
+    </PageContainer>
   );
 }

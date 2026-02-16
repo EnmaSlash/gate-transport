@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { getAuthFromHeaders, requireAuth } from "@/lib/auth";
+import { requireCarrierAuth } from "@/lib/authCarrier";
 import { putObject } from "@/lib/r2";
 
 export const runtime = "nodejs";
@@ -13,9 +14,6 @@ const ALLOWED_TYPES = new Set([
 ]);
 
 export async function POST(req: Request) {
-  const auth = requireAuth(req);
-  if (auth instanceof NextResponse) return auth;
-
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
@@ -33,6 +31,12 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
+
+    const headerUser = getAuthFromHeaders(req);
+    const carrier = headerUser ? null : await requireCarrierAuth(req, jobId);
+    if (carrier instanceof NextResponse) return carrier;
+    const auth = headerUser ? requireAuth(req) : null;
+    if (auth instanceof NextResponse) return auth;
 
     if (file.size > MAX_SIZE) {
       return NextResponse.json(

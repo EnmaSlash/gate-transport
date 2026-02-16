@@ -18,6 +18,8 @@ const ROUTE_PERMISSIONS: Record<string, readonly UserRole[]> = {
   "POST /api/jobs/[id]/pickup-confirm":     ["admin", "carrier"],
   "POST /api/jobs/[id]/delivery-submit":    ["admin", "carrier"],
   "POST /api/jobs/[id]/evidence":           ["admin", "carrier"],
+  "POST /api/jobs/[id]/evidence/simulate":  ["admin"],
+  "POST /api/jobs/[id]/issue":              ["admin"],
 
   // Shipper/admin actions
   "POST /api/jobs/[id]/evaluate":           ["admin", "shipper"],
@@ -45,6 +47,7 @@ const ROUTE_PERMISSIONS: Record<string, readonly UserRole[]> = {
   "POST /api/admin/users":                  ["admin"],
   "GET /api/admin/users":                   ["admin"],
   "POST /api/admin/users/[id]/keys":        ["admin"],
+  "POST /api/admin/outbox/drain":           ["admin"],
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

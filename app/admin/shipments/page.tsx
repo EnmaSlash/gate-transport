@@ -5,6 +5,8 @@ import {
   PageContainer, PageHeader, Card, Badge, Button, Alert,
 } from "@/components/ui";
 
+const SIM_BANNER_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SIM_EVIDENCE === "true";
+
 function authHeaders(): Record<string, string> {
   const token = typeof window !== "undefined" ? localStorage.getItem("jwt") : null;
   return token ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } : {};
@@ -48,6 +50,7 @@ export default function ShipmentsPage() {
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState(0);
   const [notifCount, setNotifCount] = useState(0);
+  const [health, setHealth] = useState<any>(null);
 
   const loadJobs = useCallback(async (statuses: string) => {
     setLoading(true);
@@ -75,6 +78,13 @@ export default function ShipmentsPage() {
     loadJobs(FILTER_TABS[activeFilter].statuses);
     loadNotifications();
   }, [activeFilter, loadJobs, loadNotifications]);
+
+  useEffect(() => {
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then((d) => setHealth(d))
+      .catch(() => setHealth({ ok: false, db: { ok: false, detail: "health fetch failed" } }));
+  }, []);
 
   function handleFilterChange(index: number) {
     setActiveFilter(index);
@@ -108,6 +118,40 @@ export default function ShipmentsPage() {
           </div>
         }
       />
+
+      {SIM_BANNER_ENABLED && (
+        <Alert variant="warning" className="mb-5">
+          <div className="font-semibold">SIMULATION MODE</div>
+          <div className="text-[12px] mt-1">
+            Simulated evidence is enabled. Carrier/dev actions may generate non-production audit/evidence entries.
+          </div>
+        </Alert>
+      )}
+
+      <Card title="System Status" accent className="mb-5">
+        {!health ? (
+          <div className="text-[13px] text-[var(--text-tertiary)]">Loading…</div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <Badge variant={health.db?.ok ? "green" : "red"}>DB {health.db?.ok ? "OK" : "FAIL"}</Badge>
+              <Badge variant={health.r2?.ok ? "green" : "amber"}>R2 {health.r2?.ok ? "OK" : "MISSING"}</Badge>
+              <Badge variant={health.simEvidence?.enabled ? "amber" : "gray"}>
+                SIM {health.simEvidence?.enabled ? "ON" : "OFF"}
+              </Badge>
+              <Badge variant="gray">PAY {health.payment?.provider ?? "—"}</Badge>
+              <Badge variant={Number(health.outbox?.queued ?? 0) > 0 ? "amber" : "gray"}>
+                OUTBOX {health.outbox?.queued ?? 0}
+              </Badge>
+            </div>
+            {!health.r2?.ok && (
+              <Alert variant="warning">
+                Uploads disabled{health.r2?.detail ? ` — ${health.r2.detail}` : ""}
+              </Alert>
+            )}
+          </>
+        )}
+      </Card>
 
       {/* Filter tabs */}
       <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1">
