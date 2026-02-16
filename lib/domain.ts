@@ -42,6 +42,7 @@ export type PaymentRailValue = (typeof PaymentRail)[keyof typeof PaymentRail];
 export const EvidenceType = {
   PICKUP_PHOTO: "pickup_photo",
   DELIVERY_PHOTO: "delivery_photo",
+  VIN_PHOTO: "vin_photo",
   VIN_SCAN: "vin_scan",
   POD: "pod",
   NOTE: "note",
@@ -69,6 +70,8 @@ export const DecisionAction = {
   ACCEPT: "accept",
   PICKUP_CONFIRM: "pickup_confirm",
   DELIVERY_SUBMIT: "delivery_submit",
+  EVIDENCE_UPLOAD: "evidence_upload",
+  NOTIFICATION_SENT: "notification_sent",
   REDACT_EVIDENCE: "redact_evidence",
   RETENTION_CLEANUP: "retention_cleanup",
 } as const;
@@ -91,6 +94,7 @@ export const GATE_DEFAULTS = {
 export const EVIDENCE_TYPES_LIST: readonly EvidenceTypeValue[] = [
   EvidenceType.PICKUP_PHOTO,
   EvidenceType.DELIVERY_PHOTO,
+  EvidenceType.VIN_PHOTO,
   EvidenceType.VIN_SCAN,
   EvidenceType.POD,
   EvidenceType.NOTE,
@@ -113,6 +117,7 @@ export function isValidApprovalMode(s: string): s is ApprovalModeValue {
 const PHOTO_TYPES: readonly string[] = [
   EvidenceType.PICKUP_PHOTO,
   EvidenceType.DELIVERY_PHOTO,
+  EvidenceType.VIN_PHOTO,
 ];
 
 export function getRetentionDays(evidenceType: string): number {

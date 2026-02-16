@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { TransportJobStatus, DecisionAction, isValidTransition } from "@/lib/domain";
-import { requireAuth, formatActor } from "@/lib/auth";
+import { TransportJobStatus, DecisionAction } from "@/lib/domain";
+import { getAuthFromHeaders, requireAuth, formatActor } from "@/lib/auth";
+import { requireCarrierAuth } from "@/lib/authCarrier";
+import { evaluateDeliveryPhase } from "@/lib/evaluatePhase";
+import { allowedFromFor, invalidTransitionPayload } from "@/lib/transitions";
 
 export const runtime = "nodejs";
 
@@ -18,50 +21,121 @@ export async function POST(
     );
   }
 
-  const auth = requireAuth(req);
-  if (auth instanceof NextResponse) return auth;
-  const actor = formatActor(auth);
+  const headerUser = getAuthFromHeaders(req);
+  let actor: string;
+  let carrier: { reason: string } | null = null;
+
+  if (headerUser) {
+    const auth = requireAuth(req);
+    if (auth instanceof NextResponse) return auth;
+    actor = formatActor(auth);
+  } else {
+    const carrierAuth = await requireCarrierAuth(req, id);
+    if (carrierAuth instanceof NextResponse) return carrierAuth;
+    actor = carrierAuth.actor;
+    carrier = carrierAuth;
+  }
 
   try {
     const body = await req.json().catch(() => ({}));
     const note = typeof body?.note === "string" ? body.note : undefined;
 
-    const job = await prisma.transportJob.findUnique({
-      where: { id },
-      select: { id: true, status: true },
-    });
-
-    if (!job) {
-      return NextResponse.json(
-        { ok: false, error: "NotFound", detail: "Job not found" },
-        { status: 404 },
-      );
-    }
-
-    if (!isValidTransition(job.status, TransportJobStatus.DELIVERY_SUBMITTED)) {
-      return NextResponse.json(
-        { ok: false, error: "Conflict", detail: `Cannot submit delivery for job in status ${job.status}` },
-        { status: 409 },
-      );
-    }
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const result = await tx.transportJob.update({
+    const result = await prisma.$transaction(async (tx) => {
+      const job = await tx.transportJob.findUnique({
         where: { id },
+        select: { id: true, status: true, gateId: true },
+      });
+
+      if (!job) {
+        return { status: 404, payload: { ok: false, error: "NotFound", detail: "Job not found" } };
+      }
+
+      if (job.status === TransportJobStatus.DELIVERY_SUBMITTED) {
+        // If caller provides a different note, allow a log entry (not a duplicate).
+        if (note) {
+          const last = await tx.decisionLog.findFirst({
+            where: { jobId: id, action: DecisionAction.DELIVERY_SUBMIT as any },
+            orderBy: { createdAt: "desc" },
+            select: { reason: true },
+          });
+          const nextReason = carrier ? `${note} | ${carrier.reason}` : note;
+          if ((last?.reason ?? "") !== nextReason) {
+            await tx.decisionLog.create({
+              data: {
+                jobId: id,
+                action: DecisionAction.DELIVERY_SUBMIT as any,
+                actor,
+                reason: nextReason,
+              },
+            });
+          }
+        }
+
+        return { status: 200, payload: { ok: true, jobId: id, already: true, status: job.status } };
+      }
+
+      const allowedFrom = allowedFromFor(TransportJobStatus.DELIVERY_SUBMITTED);
+      if (!(allowedFrom as readonly string[]).includes(job.status)) {
+        return { status: 409, payload: invalidTransitionPayload(job.status, TransportJobStatus.DELIVERY_SUBMITTED) };
+      }
+
+      // Phase requirement enforcement (delivery).
+      const gate = await tx.gate.findUnique({
+        where: { id: job.gateId },
+        select: {
+          requireDeliveryPhotos: true,
+          requireVin: true,
+          requirePod: true,
+          minDeliveryPhotos: true,
+        },
+      });
+
+      const evidence = await tx.evidence.findMany({
+        where: { jobId: id, redactedAt: null },
+        select: { type: true },
+        take: 500,
+      });
+      const counts: Record<string, number> = {};
+      for (const e of evidence) counts[e.type] = (counts[e.type] ?? 0) + 1;
+
+      const phase = evaluateDeliveryPhase(gate, counts);
+      if (!phase.pass) {
+        return {
+          status: 400,
+          payload: { ok: false, code: "MISSING_EVIDENCE", missing: phase.missing, counts },
+        };
+      }
+
+      const updatedCount = await tx.transportJob.updateMany({
+        where: { id, status: { in: allowedFrom as any } },
         data: { status: TransportJobStatus.DELIVERY_SUBMITTED },
       });
+
+      if (updatedCount.count !== 1) {
+        const latest = await tx.transportJob.findUnique({ where: { id }, select: { status: true } });
+        const current = latest?.status ?? "UNKNOWN";
+        if (current === TransportJobStatus.DELIVERY_SUBMITTED) {
+          return { status: 200, payload: { ok: true, jobId: id, already: true, status: current } };
+        }
+        return { status: 409, payload: invalidTransitionPayload(current, TransportJobStatus.DELIVERY_SUBMITTED) };
+      }
+
       await tx.decisionLog.create({
         data: {
           jobId: id,
           action: DecisionAction.DELIVERY_SUBMIT as any,
           actor,
-          reason: note ?? "delivery_submitted",
+          reason: carrier
+            ? (note ? `${note} | ${carrier.reason}` : carrier.reason)
+            : (note ?? "delivery_submitted"),
         },
       });
-      return result;
+
+      const updated = await tx.transportJob.findUnique({ where: { id } });
+      return { status: 200, payload: { ok: true, jobId: id, job: updated } };
     });
 
-    return NextResponse.json({ ok: true, jobId: id, job: updated });
+    return NextResponse.json(result.payload, { status: result.status });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: "ServerError", detail: err?.message ?? "Unknown error" },
